@@ -22,10 +22,11 @@ from router_log import router as log_router
 app = FastAPI()
 
 #CORS
-origins = ["*"]
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://10.233.97.85,https://10.233.97.84").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=allowed_origins, # เอา "*" ออก
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
