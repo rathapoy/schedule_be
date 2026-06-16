@@ -1,5 +1,7 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from router_auth import router as auth_router
 from router_user import router as user_router
 from router_schedule import router as schedule_router
@@ -18,21 +20,19 @@ from router_inc_remark import router as inc_remark_router
 from router_generate_config import router as generate_config_router
 from router_log import router as log_router
 
-
 app = FastAPI()
 
-#CORS
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://10.233.97.85,https://10.233.97.84").split(",")
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://10.233.97.85:8080,http://10.233.97.84:8080")
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins, # เอา "*" ออก
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include Routers
 app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(schedule_router)
@@ -50,7 +50,7 @@ app.include_router(cof_router)
 app.include_router(inc_remark_router)
 app.include_router(generate_config_router)
 app.include_router(log_router)
-# Root Endpoint (Optional fallback if not covered in user_router)
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
