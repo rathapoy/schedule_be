@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from typing import Optional
 import hashlib
+import logging
 
 from database import get_db_connection
 from models import UserUpdate
 from dependencies import verify_fixed_token, fetch_users, pwd_context
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -57,6 +60,7 @@ def get_role(token_data: dict = Depends(verify_fixed_token)):
         "message": f"Data retrieved for role",
         "data": result
     }
+
 @router.get("/get/team")
 def get_team(token_data: dict = Depends(verify_fixed_token)):
     with get_db_connection("account") as conn:
@@ -70,7 +74,6 @@ def get_team(token_data: dict = Depends(verify_fixed_token)):
         "data": result
     }
 
-
 @router.put("/user/update")
 def user_update(
     token_data: dict = Depends(verify_fixed_token),
@@ -83,7 +86,6 @@ def user_update(
     fields = []
     values = []
 
-    # รายการฟิลด์ที่อนุญาตให้แก้ไข
     allowed_fields = [
         'employee_id', 'thai_initialname', 'thai_firstname', 'thai_lastname',
         'eng_initialname', 'eng_firstname', 'eng_lastname', 'email',
@@ -95,17 +97,14 @@ def user_update(
         if field in data:
             val = data.get(field)
             
-            # 1. จัดการ Password แยกต่างหาก
             if field == "password":
                 if val and str(val).strip() != "":
                     fields.append("`password`=%s")
                     values.append(pwd_context.hash(str(val)))
                 continue
 
-            # 2. จัดการฟิลด์อื่นๆ โดยใช้ Placeholder %s เสมอ
             fields.append(f"`{field}`=%s")
             
-            # ตรวจสอบค่าว่าง: ถ้าเป็น None หรือเป็น String ที่มีแต่ช่องว่าง ให้ส่ง None (NULL)
             if val is None or (isinstance(val, str) and val.strip() == ""):
                 values.append(None)
             else:
@@ -124,60 +123,8 @@ def user_update(
                 conn.commit()
                 return {"status": "success", "message": "User updated successfully"}
     except Exception as e:
-        # ส่ง Error กลับไปเพื่อให้ตรวจสอบได้ง่ายขึ้น
-        raise HTTPException(status_code=500, detail=str(e))
-
-# @router.post("/user/add")
-# def user_add(
-#     token_data: dict = Depends(verify_fixed_token),
-#     data: dict = Body(...),
-# ):
-#     if not data.get("employee_id"):
-#         raise HTTPException(status_code=400, detail="Missing employee_id")
-
-#     fields = []
-#     placeholders = []
-#     values = []
-
-#     allowed_keys = [
-#         'employee_id', 'thai_initialname', 'thai_firstname', 'thai_lastname',
-#         'eng_initialname', 'eng_firstname', 'eng_lastname', 'email',
-#         'manager_id', 'approver_id', 'division', 'department', 'role_id',
-#         'team', 'shift_id', 'is_active', 'scheduled'
-#     ]
-
-#     for key in allowed_keys:
-#         val = data.get(key)
-        
-#         fields.append(f"`{key}`")
-#         placeholders.append("%s")
-        
-#         # จัดการค่าว่างให้กลายเป็น NULL (None)
-#         if val is None or (isinstance(val, str) and val.strip() == ""):
-#             values.append(None)
-#         else:
-#             values.append(val)
-
-#     # กำหนดรหัสผ่านเริ่มต้น (Hash จาก Employee ID)
-#     fields.append("`password`")
-#     placeholders.append("%s")
-#     values.append(pwd_context.hash(str(data['employee_id'])))
-
-#     sql = f"INSERT INTO user ({', '.join(fields)}) VALUES ({', '.join(placeholders)})"
-
-#     try:
-#         with get_db_connection("account") as conn:
-#             with conn.cursor() as cursor:
-#                 # ตรวจสอบ Employee ID ซ้ำ
-#                 cursor.execute("SELECT user_id FROM user WHERE employee_id = %s", (data['employee_id'],))
-#                 if cursor.fetchone():
-#                     raise HTTPException(status_code=400, detail="Employee ID already exists")
-                
-#                 cursor.execute(sql, values)
-#                 conn.commit()
-#                 return {"status": "success", "message": "User created successfully"}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Database error in user_update: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/user/add")
 def user_add(
@@ -204,36 +151,30 @@ def user_add(
         fields.append(f"`{key}`")
         placeholders.append("%s")
         
-        # จัดการค่าว่างให้กลายเป็น NULL (None)
         if val is None or (isinstance(val, str) and val.strip() == ""):
             values.append(None)
         else:
             values.append(val)
 
-    # กำหนดรหัสผ่านเริ่มต้น (Hash จาก Employee ID)
     fields.append("`password`")
     placeholders.append("%s")
     values.append(pwd_context.hash(str(data['employee_id'])))
 
-    # --- ส่วนที่เพิ่มใหม่: สร้าง username จาก email ---
     email_val = data.get('email')
     username_val = None
     
-    # ตรวจสอบว่ามีข้อมูล email และเป็น string ที่มีเครื่องหมาย @
     if email_val and isinstance(email_val, str) and "@" in email_val:
-        username_val = email_val.split('@')[0] # เอาเฉพาะ String หน้า @
+        username_val = email_val.split('@')[0]
         
     fields.append("`username`")
     placeholders.append("%s")
     values.append(username_val)
-    # ----------------------------------------------
 
     sql = f"INSERT INTO user ({', '.join(fields)}) VALUES ({', '.join(placeholders)})"
 
     try:
         with get_db_connection("account") as conn:
             with conn.cursor() as cursor:
-                # ตรวจสอบ Employee ID ซ้ำ
                 cursor.execute("SELECT user_id FROM user WHERE employee_id = %s", (data['employee_id'],))
                 if cursor.fetchone():
                     raise HTTPException(status_code=400, detail="Employee ID already exists")
@@ -241,8 +182,11 @@ def user_add(
                 cursor.execute(sql, values)
                 conn.commit()
                 return {"status": "success", "message": "User created successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Database error in user_add: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/user/clear-login")
 def clear_login(
@@ -262,4 +206,5 @@ def clear_login(
                     
                 return {"status": "success", "message": f"Login session cleared for user ID {user_id}"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Database error in clear_login: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
