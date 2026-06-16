@@ -4,10 +4,11 @@ from models import PermissionUpdate
 from dependencies import verify_fixed_token
 from pydantic import BaseModel
 from typing import Optional
-import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
 
 class RoleData(BaseModel):
     role_name: str
@@ -22,18 +23,14 @@ class PermissionData(BaseModel):
 @router.get("/api/role-matrix")
 def get_role_matrix(token_data: dict = Depends(verify_fixed_token)):
     try:
-        # ใช้รูปแบบเดียวกับ get_user_id ที่คุณใช้งานได้
         with get_db_connection("account") as conn:
             with conn.cursor() as cursor:
-                # 1. ดึง Roles
                 cursor.execute("SELECT * FROM role_detail ORDER BY role_priority ASC")
                 roles = cursor.fetchall()
 
-                # 2. ดึง Permissions
                 cursor.execute("SELECT * FROM permissions_detail")
                 permissions = cursor.fetchall()
 
-                # 3. ดึง Mapping
                 cursor.execute("SELECT role_id, permission_id FROM role_setup")
                 mapping = cursor.fetchall()
 
@@ -46,8 +43,8 @@ def get_role_matrix(token_data: dict = Depends(verify_fixed_token)):
             }
         }
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in get_role_matrix: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/api/roles")
 def create_role(data: RoleData, token_data: dict = Depends(verify_fixed_token)):
@@ -59,8 +56,8 @@ def create_role(data: RoleData, token_data: dict = Depends(verify_fixed_token)):
                 conn.commit()
         return {"status": "success", "message": "Role created"}
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in create_role: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/api/roles/{role_id}")
 def update_role(role_id: int, data: RoleData, token_data: dict = Depends(verify_fixed_token)):
@@ -72,9 +69,11 @@ def update_role(role_id: int, data: RoleData, token_data: dict = Depends(verify_
                 cursor.execute(sql, (data.role_name, data.role_priority, data.font_color, data.icon, role_id))
                 conn.commit()
         return {"status": "success", "message": "Role updated"}
+    except HTTPException:
+        raise
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in update_role: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/api/roles/{role_id}")
 def delete_role(role_id: int, token_data: dict = Depends(verify_fixed_token)):
@@ -85,9 +84,11 @@ def delete_role(role_id: int, token_data: dict = Depends(verify_fixed_token)):
                 cursor.execute("DELETE FROM role_detail WHERE role_id=%s", (role_id,))
                 conn.commit()
         return {"status": "success", "message": "Role deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in delete_role: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/api/permissions")
 def create_permission(data: PermissionData, token_data: dict = Depends(verify_fixed_token)):
@@ -99,8 +100,8 @@ def create_permission(data: PermissionData, token_data: dict = Depends(verify_fi
                 conn.commit()
         return {"status": "success", "message": "Permission created"}
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in create_permission: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/api/permissions/{perm_id}")
 def update_permission(perm_id: int, data: PermissionData, token_data: dict = Depends(verify_fixed_token)):
@@ -112,8 +113,8 @@ def update_permission(perm_id: int, data: PermissionData, token_data: dict = Dep
                 conn.commit()
         return {"status": "success", "message": "Permission updated"}
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in update_permission: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/api/permissions/{perm_id}")
 def delete_permission(perm_id: int, token_data: dict = Depends(verify_fixed_token)):
@@ -124,8 +125,8 @@ def delete_permission(perm_id: int, token_data: dict = Depends(verify_fixed_toke
                 conn.commit()
         return {"status": "success", "message": "Permission deleted"}
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in delete_permission: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/api/update-permissions")
 def update_permissions(data: PermissionUpdate, token_data: dict = Depends(verify_fixed_token)):
@@ -140,6 +141,8 @@ def update_permissions(data: PermissionUpdate, token_data: dict = Depends(verify
                     cursor.executemany(sql, values)
                 conn.commit()
         return {"status": "success", "message": "Mapping updated"}
+    except HTTPException:
+        raise
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in update_permissions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
