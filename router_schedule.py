@@ -14,7 +14,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import logging
-import traceback
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,7 +74,6 @@ def workgroup_handler(
         with conn.cursor() as cursor:
 
             if action == "get" or (not action and data is None):
-                # 2. ปรับ Query GET ให้ JOIN เอาชื่อ Break Slot มาด้วย
                 base_sql = """
                     SELECT wg.*, bs.slot_name AS default_break_slot_name 
                     FROM work_group wg
@@ -90,7 +88,6 @@ def workgroup_handler(
                 return {"status": "success", "data": result}
 
             elif action == "add" and data:
-                # 3. เพิ่ม default_break_slot_id ใน INSERT
                 sql = """
                     INSERT INTO work_group (work_group, description, modify_by, team_workgroup, default_break_slot_id) 
                     VALUES (%s, %s, %s, %s, %s)
@@ -103,7 +100,6 @@ def workgroup_handler(
                 return {"status": "success", "message": "Work group added successfully"}
 
             elif action == "update" and data and data.work_group_id:
-                # 4. เพิ่ม default_break_slot_id ใน UPDATE
                 sql = """
                     UPDATE work_group 
                     SET work_group=%s, description=%s, modify_by=%s, team_workgroup=%s, default_break_slot_id=%s 
@@ -176,33 +172,14 @@ def workschedule_handler(
 def team_handler(
     token_data: dict = Depends(verify_fixed_token),
     action: Optional[str] = Query(None),
-    # data: Optional[team] = Body(None),
 ):
     with get_db_connection("account") as conn:
         with conn.cursor() as cursor:
 
-            if action == "get" or (not action and data is None):
+            if action == "get" or (not action):
                 cursor.execute("SELECT team FROM team_detail")
                 result = cursor.fetchall()
                 return {"status": "success", "data": result}
-
-            # elif action == "add" and data:
-            #     sql = "INSERT INTO work_schedule (type_name, start_time, end_time, color, description, modify_by) VALUES (%s, %s, %s, %s, %s, %s)"
-            #     cursor.execute(sql, (data.type_name, data.start_time, data.end_time, data.color, data.description, data.modify_by))
-            #     conn.commit()
-            #     return {"status": "success", "message": "Work Schedule added successfully"}
-
-            # elif action == "update" and data and data.type_id:
-            #     sql = "UPDATE work_schedule SET type_name=%s, start_time=%s, end_time=%s, color=%s, description=%s, modify_by=%s WHERE type_id=%s"
-            #     cursor.execute(sql, (data.type_name, data.start_time, data.end_time, data.color, data.description, data.modify_by, data.type_id))
-            #     conn.commit()
-            #     return {"status": "success", "message": "Work Schedule updated successfully"}
-
-            # elif action == "delete" and data and data.type_id:
-            #     cursor.execute("DELETE FROM work_schedule WHERE type_id=%s", (data.type_id,))
-            #     conn.commit()
-            #     return {"status": "success", "message": "Work Schedule deleted successfully"}
-
             else:
                 raise HTTPException(status_code=400, detail="Invalid request or missing parameters")
 
@@ -238,7 +215,9 @@ def holiday_handler(
                     if "Duplicate entry" in str(e):
                         return {"status": "error", "message": "Date already exists."}
                     else:
-                        return {"status": "error", "message": "Database error: " + str(e)}
+                        logger.error(f"Database error in holiday_handler: {str(e)}")
+                        return {"status": "error", "message": "Internal server error"}
+                        
             elif action == "update" and data and data.holiday_id:
                 sql = "UPDATE holiday SET date=%s, description=%s  WHERE holiday_id=%s"
                 cursor.execute(sql, (data.date, data.description, data.holiday_id))
@@ -270,7 +249,6 @@ def monthschedule_handler(
         with conn.cursor() as cursor:
 
             if action == "get" or (not action and data is None):
-                
                 select_columns = """
                     s.*, 
                     u.employee_id, u.thai_initialname, u.thai_firstname, u.thai_lastname, u.email, u.shift_id, u.team,u.approver_id,
@@ -325,56 +303,38 @@ def monthschedule_handler(
                             detail="Schedule_id must be a valid integer"
                         )
                 if schedule_date is not None:
-                    try:
-                        where_clauses.append("s.schedule_date LIKE %s")
-                        params.append(schedule_date)
-                    except ValueError:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="schedule_date error"
-                        )
+                    where_clauses.append("s.schedule_date LIKE %s")
+                    params.append(schedule_date)
+
                 if team is not None:
-                    try:
-                        where_clauses.append("u.team LIKE %s")
-                        params.append(team)
-                    except ValueError:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="team error"
-                        )
+                    where_clauses.append("u.team LIKE %s")
+                    params.append(team)
+
                 if priority is not None:
-                    try:
-                        where_clauses.append("ws.priority LIKE %s")
-                        params.append(priority)
-                    except ValueError:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="priority error"
-                        )
+                    where_clauses.append("ws.priority LIKE %s")
+                    params.append(priority)
+
                 if schedule_status is not None:
-                    try:
-                        where_clauses.append("s.status = %s")
-                        params.append(schedule_status)
-                    except ValueError:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="schedule_status error"
-                        )
+                    where_clauses.append("s.status = %s")
+                    params.append(schedule_status)
+
                 if user_id is not None:
                     try:
                         where_clauses.append("s.user_id = %s")
-                        params.append(user_id)
+                        params.append(int(user_id))
                     except ValueError:
                         raise HTTPException(
                             status_code=400,
                             detail="user_id error"
                         )
+                        
                 if where_clauses:
                     query += " WHERE " + " AND ".join(where_clauses)
 
                 cursor.execute(query, tuple(params))
                 result = cursor.fetchall()
                 return {"status": "success", "data": result}
+                
             elif action == "change_status" and data and data.schedule_id and data.status:
                 fields = ["status = %s"]
                 params = [data.status]
@@ -492,7 +452,6 @@ def upsert_monthschedule(
                             s.remark
                         ))
 
-                # 🔹 BULK UPDATE
                 if update_rows:
                     update_sql = """
                         UPDATE noc_schedule
@@ -508,7 +467,6 @@ def upsert_monthschedule(
                     """
                     cursor.executemany(update_sql, update_rows)
 
-                # 🔹 BULK INSERT / UPSERT
                 if insert_rows:
                     insert_sql = """
                         INSERT INTO noc_schedule 
@@ -532,7 +490,8 @@ def upsert_monthschedule(
 
             except Exception as e:
                 conn.rollback()
-                raise HTTPException(status_code=500, detail=str(e))
+                logger.error(f"Database error in upsert_monthschedule: {str(e)}")
+                raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.api_route("/schedule/month/config", methods=["GET", "POST", "PUT", "DELETE"])
 def monthly_config_handler(
@@ -541,7 +500,6 @@ def monthly_config_handler(
     data: Optional[MonthConfig] = Body(None),
     monthyear: Optional[str] = Query(None),
 ):
-    # เชื่อมต่อ Database schedule สำหรับ Config ทั่วไป
     with get_db_connection("schedule") as conn:
         with conn.cursor() as cursor:
             if action == "get":
@@ -558,8 +516,6 @@ def monthly_config_handler(
                 return {"status": "success", "data": result}
 
             elif action == "get_teams":
-                # [ใหม่] เชื่อมต่อ Database account เพื่อดึง Team Detail
-                # ใช้ context manager แยกออกมาเพื่อ connect ไปยัง database account
                 try:
                     with get_db_connection("account") as conn_acc:
                         with conn_acc.cursor() as cursor_acc:
@@ -567,7 +523,8 @@ def monthly_config_handler(
                             teams = cursor_acc.fetchall()
                             return {"status": "success", "data": teams}
                 except Exception as e:
-                     return {"status": "error", "message": f"Failed to fetch teams: {str(e)}"}
+                     logger.error(f"Failed to fetch teams: {str(e)}")
+                     return {"status": "error", "message": "Internal server error"}
 
             elif action == "add" and data:
                 sql = "INSERT INTO month_config (month_year, team_config, is_enabled, is_locked, modify_by) VALUES (%s, %s, %s, %s, %s)"
@@ -607,7 +564,6 @@ def request_handler(
 ):
     with get_db_connection("schedule") as conn:
         with conn.cursor() as cursor:
-            # 1. GET (All or Single by ID)
             if action == "get" or (not action and data is None):
                 if request_id:
                     cursor.execute("SELECT * FROM `request_view` WHERE request_id=%s", (request_id,))
@@ -616,7 +572,6 @@ def request_handler(
                 result = cursor.fetchall()
                 return {"status": "success", "data": result}
             
-            # 2. GET USER INFO
             elif action == "getinfo_userid":
                 if not data or not data.request_user_id:
                     raise HTTPException(status_code=400, detail="request_user_id is required")
@@ -627,7 +582,6 @@ def request_handler(
                 result = cursor.fetchall()
                 return {"status": "success", "data": result}
             
-            # 3. GET TARGET (For Swap/Standby checks/task check)
             elif action == "get-task":
                 if not data or not data.user_replace_id :
                     raise HTTPException(
@@ -666,15 +620,12 @@ def request_handler(
                 )
                 result = cursor.fetchall()
                 return {"status": "success", "data": result}
-            # 4. GET INFO (Check logic - now supports fetching by request_id via query or schedule_id via body)
             elif action == "getinfo":
-                # Special Case: If PHP sends request_id via Query String for this action
                 if request_id:
                     cursor.execute("SELECT * FROM request_view WHERE request_id=%s", (request_id,))
                     result = cursor.fetchall()
                     return {"status": "success", "data": result}
 
-                # Default Case: By Schedule ID
                 if not data or not data.schedule_id:
                     raise HTTPException(status_code=400, detail="schedule_id is required")
 
@@ -685,19 +636,25 @@ def request_handler(
                 result = cursor.fetchall()
                 return {"status": "success", "data": result}
             
-            # 5. ADD REQUEST
             elif action == "add" and data:
                 try:
                     payload = data.dict(exclude_none=True)
                     if "request_id" in payload:
-                        del payload["request_id"] # Let DB handle auto-increment
+                        del payload["request_id"]
 
-                    if not payload:
-                        raise HTTPException(status_code=400, detail="No data to insert")
+                    allowed_keys = [
+                        "schedule_id", "target_schedule_id", "request_type_id", "request_user_id",
+                        "user_replace_id", "user_replace_confirm", "date_confirm", "approver_user_id",
+                        "date_approve", "reason_for_rejection", "request_reason", "request_status"
+                    ]
+                    filtered_payload = {k: v for k, v in payload.items() if k in allowed_keys}
 
-                    columns = ", ".join(payload.keys())
-                    placeholders = ", ".join(["%s"] * len(payload))
-                    values = tuple(payload.values())
+                    if not filtered_payload:
+                        raise HTTPException(status_code=400, detail="No valid data to insert")
+
+                    columns = ", ".join(filtered_payload.keys())
+                    placeholders = ", ".join(["%s"] * len(filtered_payload))
+                    values = tuple(filtered_payload.values())
 
                     sql = f"""
                         INSERT INTO requests ({columns})
@@ -710,9 +667,9 @@ def request_handler(
                     return {"status": "success", "message": "Request created successfully"}
 
                 except Exception as e:
-                    return {"status": "error", "message": str(e)}
+                    logger.error(f"Database error in request_handler (add): {str(e)}")
+                    return {"status": "error", "message": "Internal server error"}
             
-            # 6. UPDATE REQUEST
             elif action == "update":
                 if not data or not data.request_id:
                     raise HTTPException(status_code=400, detail="request_id is required")
@@ -720,11 +677,18 @@ def request_handler(
                 payload = data.dict(exclude_none=True)
                 r_id = payload.pop("request_id")
 
-                if not payload:
+                allowed_keys = [
+                    "schedule_id", "target_schedule_id", "request_type_id", "request_user_id",
+                    "user_replace_id", "user_replace_confirm", "date_confirm", "approver_user_id",
+                    "date_approve", "reason_for_rejection", "request_reason", "request_status"
+                ]
+                filtered_payload = {k: v for k, v in payload.items() if k in allowed_keys}
+
+                if not filtered_payload:
                      return {"status": "success", "message": "No changes."}
 
-                set_clause = ", ".join([f"{k}=%s" for k in payload.keys()])
-                values = tuple(payload.values()) + (r_id,)
+                set_clause = ", ".join([f"{k}=%s" for k in filtered_payload.keys()])
+                values = tuple(filtered_payload.values()) + (r_id,)
 
                 sql = f"UPDATE requests SET {set_clause} WHERE request_id=%s"
                 cursor.execute(sql, values)
@@ -772,7 +736,6 @@ def get_overtime(month: str = None,token_data: dict = Depends(verify_fixed_token
             params = []
 
             if month:
-
                 sql += " WHERE LEFT(schedule_date, 7) = %s"
                 params.append(month) 
             
@@ -816,8 +779,6 @@ def get_break_slots(token_data: dict = Depends(verify_fixed_token)):
             result = cursor.fetchall()
             return {"status": "success", "data": result}
 
-
-
 @router.post("/api/override-break")
 def override_break_slot(req: OverrideBreakRequest, token_data: dict = Depends(verify_fixed_token)):
     try:
@@ -849,18 +810,17 @@ def override_break_slot(req: OverrideBreakRequest, token_data: dict = Depends(ve
                     "message": "break time update success."
                 }
     except Exception as e:
-        error_detail = traceback.format_exc()
-        logger.error(f"Detailed Error: {error_detail}")
+        logger.error(f"Database error in override_break_slot: {str(e)}")
         raise HTTPException(
             status_code=500, 
-            detail=f"Database Error: {str(e)}"
+            detail="Internal server error"
         )
+
 @router.get("/api/all-break-slots")
 def get_all_break_slots(token_data: dict = Depends(verify_fixed_token)):
     try:
         with get_db_connection("schedule") as conn:
             with conn.cursor() as cursor:
-                # สังเกตว่าจะไม่มี WHERE is_active = 1 เพราะต้องการให้หน้าจัดการเห็นทั้งหมด
                 sql = """
                     SELECT slot_id, slot_name, 
                            TIME_FORMAT(start_time, '%H:%i:%s') AS start_time, 
@@ -873,17 +833,13 @@ def get_all_break_slots(token_data: dict = Depends(verify_fixed_token)):
                 return {"status": "success", "data": cursor.fetchall()}
     except Exception as e:
         logger.error(f"Fetch All Slots Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-
-# 3. Endpoint: Single POST สำหรับ Add, Edit, Delete
 @router.post("/api/manage-break-slots")
 def manage_break_slots(req: ManageSlotRequest, token_data: dict = Depends(verify_fixed_token)):
     try:
         with get_db_connection("schedule") as conn:
             with conn.cursor() as cursor:
-                
-   
                 if req.action == "create":
                     sql = """
                         INSERT INTO break_slots (slot_name, start_time, end_time, is_active) 
@@ -909,11 +865,10 @@ def manage_break_slots(req: ManageSlotRequest, token_data: dict = Depends(verify
                 else:
                     raise ValueError("Action ไม่ถูกต้อง (ต้องเป็น create, update หรือ delete)")
                 
-
                 conn.commit()
                 
                 return {"status": "success", "message": msg}
                 
     except Exception as e:
         logger.error(f"Manage Break Slot Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
